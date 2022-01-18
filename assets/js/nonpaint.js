@@ -1,9 +1,124 @@
 $().on('load', async e => {
-  const {aimClient,dmsClient} = aim;
-  console.log('AIM', aimClient, dmsClient, aim.config);
+  const searchParams = new URLSearchParams(document.location.search);
+  function signOut() {
+    // aimClient.storage.removeItem('aimAccount');
+    aimClient.logout().catch(console.error).then(e => document.location.reload());
+  }
+  async function signIn(){
+    const authResult = await aimClient.loginPopup(aimRequest);
+    // const authProvider = new aimClient.AuthProvider(aimClient, {
+    //   // account: authResult.account,
+    //   scopes: aimRequest.scopes,
+    // });
+
+    const user = await dmsClient
+    .api('/me')
+    // .select('id,displayName,mail,userPrincipalName,mailboxSettings')
+    .select('id,name,accountname')
+    .get();
+    console.log(user);
+    aimClient.store('aimUser', JSON.stringify(user));
+    $('.account span.user').text(user.name || user.accountname);
+    // sessionStorage.setItem('aimUser', JSON.stringify(user));
+  }
+
+  function search(search){
+    dmsClient.api('/product').query({
+      search: search,
+      select: 'id,titel,ppe,merk',
+    }).get().then(body => {
+      const {rows} = body;
+      console.log(rows);
+      aim.listview(rows);
+    })
+  }
+
+  $(document.documentElement).class('app') ;
+  $(document.documentElement).attr('dark', localStorage.getItem('dark'));
+  $(document.body).append(
+    $('nav').append($('article').append(
+      $('button').class('abtn menu').on('click', e => $(document.documentElement).class(getItem('isApp', getItem('isApp') !== 'app' ? 'app' : 'page' ))),
+      $('form').class('search row aco')
+      .on('submit', e => {
+        e.preventDefault();
+        // $('.pv').text('');
+        const url = new URL(document.location);
+        url.searchParams.set('search', e.target.search.value);
+        window.history.replaceState('','',url.href);
+        search(e.target.search.value);
+      })
+      .append(
+        $('input').name('search').autocomplete('off').placeholder('zoeken').value(searchParams.get('search')),
+        $('button').class('abtn icn search fr').title('Zoeken'),
+      ),
+
+      $('span').class('pagemenu'),
+      $('button').class('abtn dark').on('click', e => $(document.documentElement).attr('dark', getItem('dark', getItem('dark')^1))),
+      $('button').class('abtn shop'),
+      $('button').class('abtn account').append(
+        $('span').append(
+          $('span').class('company'),
+          $('span').class('user'),
+        ),
+        $('div').append(
+          $('button').text('aanmelden').on('click', signIn),
+          $('button').text('afmelden').on('click', signOut),
+          $('button').text('gegevens').on('click', e => {
+            dmsClient.api('/me').select('*').get().then(row => {
+              row.schemaName = 'Contact';
+              pageviewrow(row);
+            });
+          }),
+        )
+      ),
+    )),
+    $('header').append($('article')),
+    $('main').append($('article').append(
+      $('aside').class('left'),
+      $('div').class('lv'),
+      $('section').class('pv doc-content').css('max-width', $().storage('view.width') || '700px'),
+      $('div').class('dv'),
+      $('aside').class('right'),
+      $('div').class('prompt'),
+    )),
+    $('footer').class('page').append(
+      $('article'),
+    ),
+  );
+
+
+  const aimConfig = {
+    client_id: aim.config.client_id,
+    scope: 'openid profile name email',
+  };
+  const aimClient = new aim.PublicClientApplication(aimConfig);
+  const config = await aimClient.getConfig();
+  Object.assign(aim.config, config);
+  const aimRequest = {
+    scopes: aimConfig.scope.split(' '),
+  };
+  const dmsConfig = aim.dmsConfig = {
+    servers: [{url: aim.dmsUrl}],
+  };
+  const authProvider = new aimClient.AuthProvider(aimClient, {
+    // account: authResult.account,
+    scopes: aimRequest.scopes,
+  });
+  const dmsClient = aim.dmsClient = aim.Client.initWithMiddleware({authProvider}, aim.dmsConfig);
+
+  if (aimClient.store('aimUser')) {
+    const user = JSON.parse(aimClient.store('aimUser'));
+    // const authProvider = new aimClient.AuthProvider(aimClient, {
+    //   // account: authResult.account,
+    //   scopes: aimRequest.scopes,
+    // });
+    // dmsClient = aim.Client.initWithMiddleware({authProvider}, dmsConfig);
+    $('.account span.user').text(user.name || user.accountname);
+  }
+
   let clientart = [];
   let clientName = null;
-  console.log(1111, aimClient);
+  console.log(1111, aimClient, aim.config);
   async function selectClient(name){
     localStorage.setItem('clientName', clientName = name);
     $('button.account span.company').text(clientName||'');
@@ -13,133 +128,7 @@ $().on('load', async e => {
   function num(value, dig = 2){
     return new Intl.NumberFormat('nl-NL', { minimumFractionDigits: dig, maximumFractionDigits: dig }).format(value);
   }
-  aim.om.treeview({
-    'Shop': {
-      Producten: e => aim.list('product',{
-        $filter: clientName ? `klantnaam eq '${clientName}'` : 'klantnaam eq null',
-        $search: ``,
-      }),
-      Boodschappenlijst() {
-        aim.list('art',{
-          $filter: `id IN (SELECT artId FROM abisingen.dbo.klantartikelen WHERE klantid = '${clientName}')`,
-          $search: '*',
-        });
-      },
-      Winkelmandje() {
-        aim.list('salesorderrow',{$filter: `clientName EQ '${clientName}' and isOrder EQ 0`});
-      },
-    },
-  });
   aim.config.components.schemas.product.app = {
-    header(row){
-      const elem = $('div').class('price');
-      var price;
-
-      row.orderContent = row.orderContent == 1 ? row.partContent || 1 : row.orderContent;
-
-      row.orderPackPrice = row.orderPackPrice || row.orderPartPrice * row.orderContent;
-      row.orderDiscount = row.artikelInkKorting;
-      if (!row.orderDiscount) {
-        row.orderPackPrice *= 1.5;
-        row.orderDiscount = 50;
-      }
-
-      row.orderPartPrice = row.orderPackPrice / row.orderContent;
-      if (row.supplier) {
-        var discount = row.orderDiscount;
-        var style = 'color:lightgreen;font-size:1.2em';
-        elem.append(
-          $('div').append(
-            $('span').text('€ ' + num(row.orderPackPrice)).style('text-decoration:line-through;'),
-            ' (-' + num(discount).replace(/,00$|0$/g,'') + '%) € ',
-            $('span').text(num(price = row.orderPackPrice*(100-discount)/100)).style(style),
-            ' ',
-            row.orderContent == 1 ? null : ' € ' + num(row.orderPartPrice*(100-discount)/100) + '/' + row.orderContentUnit,
-            ' (€ ' + num(price * 1.21) + ' incl. btw) ',
-            row.supplier,
-          ),
-        );
-      }
-      var discount = row.orderDiscount * 0.4;
-      var style = 'color:lightblue;font-size:1.2em';
-      elem.append(
-        $('div').append(
-          $('span').text('€ ' + num(row.orderPackPrice)).style('text-decoration:line-through;'),
-          ' (-' + num(discount).replace(/,00$|0$/g,'') + '%) € ',
-          $('span').text(num(price = row.orderPackPrice*(100-discount)/100)).style(style),
-          ' ',
-          row.orderContent == 1 ? null : ' € ' + num(row.orderPartPrice*(100-discount)/100) + '/' + row.orderContentUnit,
-          ' (€ ' + num(price * 1.21) + ' incl. btw) ',
-        ),
-      );
-      if (row.clientDiscount) {
-        var discount = row.clientDiscount;
-        var style = 'color:orange;font-size:1.2em';
-
-        elem.append(
-          $('div').append(
-            $('span').text('€ ' + num(row.orderPackPrice)).style('text-decoration:line-through;'),
-            ' (-' + num(discount).replace(/,00$|0$/g,'') + '%) € ',
-            $('span').text(num(price = row.orderPackPrice*(100-discount)/100)).style(style),
-            ' ',
-            row.orderContent == 1 ? null : ' € ' + num(row.orderPartPrice*(100-discount)/100) + '/' + row.orderContentUnit,
-            ' (€ ' + num(price * 1.21) + ' incl. btw) ',
-            row.clientName,
-          ),
-        );
-      }
-      elem.append(
-        $('div').append(
-          'Verzending in: ',
-          $('b').text(row.verzending).style('color:green;'),
-          elem.input = $('input').type('number').step(1).min(0).value(row.quant).on('change', e => {
-            row.quant = Number(e.target.value);
-            console.log(row.quant);
-          }).on('click', e => {
-            e.stopPropagation();
-          }),
-        )
-      );
-
-
-      return elem;
-
-      const myart = clientart.find(a => a.artId === row.id);
-      if (myart) {
-        row.discount = myart.clientDiscount;
-      }
-      row.listPrice = Number(row.listPrice);
-      row.purchaseDiscount = Number(row.purchaseDiscount);
-      if (row.purchaseDiscount = Number(row.purchaseDiscount)) {
-        row.purchasePrice = row.listPrice * (100 - row.purchaseDiscount) / 100;
-      } else if (row.purchasePrice = Number(row.purchasePrice)) {
-        row.purchaseDiscount = row.purchasePrice / row.listPrice * 100;
-      }
-      row.price = row.listPrice * (100 - row.discount) / 100;
-      // console.log(row);
-      // const elem = $('div').class('price');
-      if (row.discount) {
-        elem.class('price discount', myart ? 'client' : '').append(
-          $('span').attr('listprice', num(row.listPrice)),
-          $('span').attr('discount', num(-row.discount,0)),
-        );
-      }
-      elem.append(
-        $('span').attr('price', num(row.price)),
-        $('span').attr('fatprice', num(row.price * 1.21)),
-        row.purchasePrice ? $('span').attr('purchaseprice', num(row.purchasePrice)) : null,
-        row.purchaseDiscount ? $('span').attr('purchasediscount', num(row.purchaseDiscount)) : null,
-
-        $('span'),
-        elem.input = $('input').type('number').step(1).min(0).value(row.quant).on('change', e => {
-          row.quant = Number(e.target.value);
-          console.log(row.quant);
-        }).on('click', e => {
-          e.stopPropagation();
-        }),
-      );
-      return elem;
-    },
     header(row){
       const elem = $('div').class('price');
       var price;
@@ -187,5 +176,7 @@ $().on('load', async e => {
       return elem;
     },
   }
+
+  if (searchParams.get('search')) search(searchParams.get('search'));
 
 });
